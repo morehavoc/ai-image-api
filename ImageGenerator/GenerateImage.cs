@@ -4,7 +4,9 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
-using System;
+using System.IO;
+using System.Text;
+using Azure.Storage.Blobs;
 
 namespace morehavoc.ai
 {
@@ -50,8 +52,7 @@ namespace morehavoc.ai
 
             try
             {
-                var request = JsonSerializer.Deserialize<ImageGenerationRequest>(requestBody, 
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var request = JsonSerializer.Deserialize<ImageGenerationRequest>(requestBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (request == null)
                 {
@@ -63,14 +64,44 @@ namespace morehavoc.ai
                 {
                     return new BadRequestObjectResult("Invalid image type. Must be one of: bw, color, sticker, whisperframe");
                 }
-
-                // TODO: Implement the image generation workflow
-                // For now, return a mock response
+                
+                // Generate a new GUID for this request
+                string requestId = Guid.NewGuid().ToString();
+                
+                // Simulate image generation by creating dummy image data
+                byte[] dummyImageBytes = Encoding.UTF8.GetBytes("Fake image generated for request " + requestId);
+                
+                // Retrieve the blob storage connection string from environment variables.
+                // For local development with Azurite, set AZURE_STORAGE_CONNECTION_STRING in local.settings.json
+                string storageConnectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "UseDevelopmentStorage=true";
+                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
+                
+                // Use the 'Group' parameter (lowercased) as the container name.
+                string containerName = request.Group.ToLowerInvariant();
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                
+                // Create the container if it doesn't already exist.
+                await containerClient.CreateIfNotExistsAsync();
+                
+                // Use the generated GUID as the blob name with a .jpg extension.
+                string blobName = requestId + ".jpg";
+                BlobClient blobClient = containerClient.GetBlobClient(blobName);
+                
+                // Upload the dummy image data to the blob.
+                using (MemoryStream ms = new MemoryStream(dummyImageBytes))
+                {
+                    await blobClient.UploadAsync(ms, overwrite: true);
+                }
+                
+                // Construct the URL of the uploaded blob.
+                string blobUrl = blobClient.Uri.ToString();
+                
                 var response = new
                 {
-                    RequestId = Guid.NewGuid().ToString(),
+                    RequestId = requestId,
                     Status = "Accepted",
-                    Message = "Image generation request received"
+                    Message = "Image generation request received",
+                    ImageUrl = blobUrl
                 };
 
                 return new AcceptedResult("", response);
@@ -78,6 +109,45 @@ namespace morehavoc.ai
             catch (JsonException)
             {
                 return new BadRequestObjectResult("Invalid JSON format");
+            }
+        }
+
+        [Function("GetImage")]
+        public async Task<IActionResult> GetImage(
+            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "image/{group}/{id}")] HttpRequest req,
+            string group,
+            string id)
+        {
+            _logger.LogInformation($"Retrieving image from group {group} with id {id}");
+
+            try
+            {
+                string storageConnectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "UseDevelopmentStorage=true";
+                BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
+                
+                string containerName = group.ToLowerInvariant();
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                
+                if (!await containerClient.ExistsAsync())
+                {
+                    return new NotFoundObjectResult($"Group '{group}' not found");
+                }
+
+                string blobName = $"{id}.jpg";
+                BlobClient blobClient = containerClient.GetBlobClient(blobName);
+                
+                if (!await blobClient.ExistsAsync())
+                {
+                    return new NotFoundObjectResult($"Image '{id}' not found in group '{group}'");
+                }
+
+                var response = await blobClient.DownloadContentAsync();
+                return new FileContentResult(response.Value.Content.ToArray(), "image/jpeg");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving image");
+                return new StatusCodeResult(StatusCodes.Status500InternalServerError);
             }
         }
 

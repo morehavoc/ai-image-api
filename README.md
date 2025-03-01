@@ -18,6 +18,7 @@ Each group defined above will be registered in the settings file and will have t
 - prompt - The AI prompt used to generate the image. This is specific to the group so that you can taylor it for each conference or purpose. It can have the following tags that are replaced dynamically:
 	- {name} - the name of the user, if provided
 	- {email} - the email of the user
+	- {details} - the details provided in the request 
 - email - The email html that will be sent to the user. It can have the following tags that are replaced dynamically:
 	- {name}
 	- {email}
