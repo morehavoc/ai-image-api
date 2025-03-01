@@ -7,6 +7,12 @@ using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Text;
 using Azure.Storage.Blobs;
+using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using OpenAI;
+using OpenAI.Chat;
+using OpenAI.Images;
 
 namespace morehavoc.ai
 {
@@ -30,13 +36,21 @@ namespace morehavoc.ai
         public string? Name { get; set; }
     }
 
+
     public class GenerateImage
     {
         private readonly ILogger<GenerateImage> _logger;
+        private readonly string _openAIApiKey;
+        private readonly string _openAIModel;
 
+        private OpenAIClient _openAIClient;
         public GenerateImage(ILogger<GenerateImage> logger)
         {
             _logger = logger;
+            _openAIApiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? string.Empty;
+            _openAIModel = Environment.GetEnvironmentVariable("OPENAI_MODEL") ?? "gpt-4";
+            _openAIClient = new OpenAIClient(_openAIApiKey);
+            
         }
 
         [Function("GenerateImage")]
@@ -68,8 +82,11 @@ namespace morehavoc.ai
                 // Generate a new GUID for this request
                 string requestId = Guid.NewGuid().ToString();
                 
-                // Simulate image generation by creating dummy image data
-                byte[] dummyImageBytes = Encoding.UTF8.GetBytes("Fake image generated for request " + requestId);
+                // Generate image prompt using GPT-4
+                string imagePrompt = await GenerateImagePromptAsync(request);
+                
+                // Generate a dummy image (in a real implementation, this would call the OpenAI API)
+                byte[] imageBytes = await GenerateAiImage(imagePrompt);
                 
                 // Retrieve the blob storage connection string from environment variables.
                 // For local development with Azurite, set AZURE_STORAGE_CONNECTION_STRING in local.settings.json
@@ -87,21 +104,22 @@ namespace morehavoc.ai
                 string blobName = requestId + ".jpg";
                 BlobClient blobClient = containerClient.GetBlobClient(blobName);
                 
-                // Upload the dummy image data to the blob.
-                using (MemoryStream ms = new MemoryStream(dummyImageBytes))
+                // Upload the image data to the blob.
+                using (MemoryStream ms = new MemoryStream(imageBytes))
                 {
                     await blobClient.UploadAsync(ms, overwrite: true);
                 }
                 
                 // Construct the URL of the uploaded blob.
-                string blobUrl = blobClient.Uri.ToString();
+                var blobUrl = $"api/image/{containerName}/{requestId}";
                 
                 var response = new
                 {
                     RequestId = requestId,
                     Status = "Accepted",
                     Message = "Image generation request received",
-                    ImageUrl = blobUrl
+                    ImageUrl = blobUrl,
+                    Prompt = imagePrompt
                 };
 
                 return new AcceptedResult("", response);
@@ -109,6 +127,11 @@ namespace morehavoc.ai
             catch (JsonException)
             {
                 return new BadRequestObjectResult("Invalid JSON format");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing image generation request");
+                return new StatusCodeResult(StatusCodes.Status500InternalServerError);
             }
         }
 
@@ -158,6 +181,85 @@ namespace morehavoc.ai
                 "bw" or "color" or "sticker" or "whisperframe" => true,
                 _ => false
             };
+        }
+        
+        /// <summary>
+        /// Generates an image prompt using GPT-4 based on the request details
+        /// </summary>
+        private async Task<string> GenerateImagePromptAsync(ImageGenerationRequest request)
+        {               
+            try
+            {
+                // Create a system message that instructs GPT-4 how to generate image prompts
+                string systemMessage = @"
+                You are an expert at creating detailed image generation prompts. 
+                Your task is to create a vivid, detailed prompt for image generation based on the user's request.
+                For different image types, adjust your prompt style:
+                - bw: Create a black and white artistic image prompt with strong contrast and mood
+                - color: Create a vibrant, colorful image prompt with rich details
+                - sticker: Create a cute, simple, cartoon-style sticker design prompt
+                - whisperframe: Create a dreamy, ethereal, slightly abstract image prompt
+                
+                Your prompt should be 1-3 sentences long and highly descriptive.";
+                
+                // Create a user message that includes the request details
+                string userMessage = $"Create an image prompt for type: {request.Type}. ";
+                
+                if (!string.IsNullOrEmpty(request.Details))
+                {
+                    userMessage += $"Details: {request.Details}. ";
+                }
+                
+                if (!string.IsNullOrEmpty(request.Name))
+                {
+                    userMessage += $"User name: {request.Name}. ";
+                }
+                var chat = _openAIClient.GetChatClient("gpt-4");
+                List<ChatMessage> messages = 
+                [
+                    new SystemChatMessage(systemMessage),
+                    new UserChatMessage(userMessage)
+                ];
+                
+                var response = await chat.CompleteChatAsync(messages, new ChatCompletionOptions
+                {
+                    Temperature = 0.7f, MaxOutputTokenCount = 300,
+                });
+                // Check if the request was successful
+                if (response.Value.Content[0].Text != null)
+                {
+                    return response.Value.Content[0].Text;
+                }
+                else
+                {
+                    _logger.LogError($"Error calling OpenAI API: {response} ");
+                    return $"A {request.Type} image based on: {request.Details ?? "abstract art"}";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating image prompt with GPT-4");
+                // Fallback to a simple prompt if GPT-4 fails
+                return $"A {request.Type} image based on: {request.Details ?? "abstract art"}";
+            }
+        }
+        
+        /// <summary>
+        /// Generates a dummy image (in a real implementation, this would call the OpenAI API)
+        /// </summary>
+        private async Task<byte[]> GenerateAiImage(string prompt)
+        {
+            ImageGenerationOptions options = new()
+            {
+                Quality = GeneratedImageQuality.High,
+                Size = GeneratedImageSize.W1792xH1024,
+                Style = GeneratedImageStyle.Vivid,
+                ResponseFormat = GeneratedImageFormat.Bytes
+            };
+            var imgClient = _openAIClient.GetImageClient("dall-e-3");
+            GeneratedImage image = await imgClient.GenerateImageAsync(prompt, options);
+            BinaryData bytes = image.ImageBytes;
+            return bytes.ToArray();
         }
     }
 }

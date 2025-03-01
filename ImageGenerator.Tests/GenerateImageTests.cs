@@ -21,41 +21,10 @@ namespace ImageGenerator.Tests
         public GenerateImageTests()
         {
             _blobServiceClient = new BlobServiceClient("UseDevelopmentStorage=true");
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            foreach (var containerName in _containersToDelete)
-            {
-                try
-                {
-                    await _blobServiceClient.DeleteBlobContainerAsync(containerName);
-                }
-                catch
-                {
-                    // Ignore cleanup errors
-                }
-            }
-        }
-
-
-        private static HttpRequest CreateEmptyRequest()
-        {
-            return new DefaultHttpContext().Request;
-        }
-
-        public async Task Run_WithValidRequest_ReturnsAcceptedResultAndStoresBlob()
-            string groupName = "testgroup" + Guid.NewGuid().ToString("n");
-            _containersToDelete.Add(groupName);
-
-                $"\"Group\":\"{groupName}\"," +
-using Azure.Storage.Blobs;
-    public class GenerateImageTests : IAsyncDisposable
-        private readonly BlobServiceClient _blobServiceClient;
-        private readonly List<string> _containersToDelete = new();
-        public GenerateImageTests()
-        {
-            _blobServiceClient = new BlobServiceClient("UseDevelopmentStorage=true");
+            
+            // Set up environment variables for testing
+            Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
+            // Note: We don't set OPENAI_API_KEY here to test the fallback mechanism
         }
 
         public async ValueTask DisposeAsync()
@@ -72,6 +41,9 @@ using Azure.Storage.Blobs;
                     // Ignore cleanup errors
                 }
             }
+            
+            // Clean up environment variables
+            Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", null);
         }
 
         // Helper method to create a fake HttpRequest with the given body
@@ -83,11 +55,16 @@ using Azure.Storage.Blobs;
             return request;
         }
 
+        private static HttpRequest CreateEmptyRequest()
+        {
+            return new DefaultHttpContext().Request;
+        }
+
         [Fact]
         public async Task Run_WithValidRequest_ReturnsAcceptedResultAndStoresBlob()
         {
             // Arrange
-            string groupName = "testgroup" + Guid.NewGuid().ToString("n"); // Ensure unique container name
+            string groupName = "testgroup"; // Ensure unique container name
             _containersToDelete.Add(groupName); // Mark for cleanup
 
             string json = "{" +
@@ -102,8 +79,10 @@ using Azure.Storage.Blobs;
             var logger = NullLogger<GenerateImage>.Instance;
             var function = new GenerateImage(logger);
 
+            // Act
             IActionResult result = await function.Run(request);
 
+            // Assert
             var acceptedResult = Assert.IsType<AcceptedResult>(result);
             string responseJson = JsonSerializer.Serialize(acceptedResult.Value);
             var responseData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(responseJson);
@@ -113,18 +92,60 @@ using Azure.Storage.Blobs;
             Assert.True(responseData.ContainsKey("Status"));
             Assert.True(responseData.ContainsKey("Message"));
             Assert.True(responseData.ContainsKey("ImageUrl"));
+            Assert.True(responseData.ContainsKey("Prompt"));
+            Assert.Equal("Accepted", responseData["Status"].GetString());
             
+            // Verify blob was created
             string requestId = responseData["RequestId"].GetString();
             var containerClient = _blobServiceClient.GetBlobContainerClient(groupName);
             var blobClient = containerClient.GetBlobClient($"{requestId}.jpg");
             var exists = await blobClient.ExistsAsync();
             Assert.True(exists.Value, "Blob should exist in storage");
+        }
 
-            var getResult = await function.GetImage(CreateEmptyRequest(), groupName, requestId);
+        [Fact]
+        public async Task GenerateAndRetrieveImage_FullFlow_Success()
+        {
+            // Arrange
+            string groupName = "testgroup";
+            _containersToDelete.Add(groupName);
+
+            string json = "{" +
+                "\"Email\":\"test@example.com\"," +
+                $"\"Group\":\"{groupName}\"," +
+                "\"Type\":\"bw\"," +
+                "\"SendEmail\":true," +
+                "\"Details\":\"A simple test image\"," +
+                "\"Name\":\"Test User\"" +
+            "}";
+            HttpRequest request = CreateHttpRequest(json);
+            var logger = NullLogger<GenerateImage>.Instance;
+            var function = new GenerateImage(logger);
+
+            // Act - Generate the image
+            IActionResult generateResult = await function.Run(request);
+            
+            // Assert - Verify generation result
+            var acceptedResult = Assert.IsType<AcceptedResult>(generateResult);
+            string responseJson = JsonSerializer.Serialize(acceptedResult.Value);
+            var responseData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(responseJson);
+            
+            Assert.NotNull(responseData);
+            string requestId = responseData["RequestId"].GetString();
+            
+            // Act - Retrieve the generated image
+            IActionResult getResult = await function.GetImage(CreateEmptyRequest(), groupName, requestId);
+            
+            // Assert - Verify retrieved image
             var fileResult = Assert.IsType<FileContentResult>(getResult);
             Assert.Equal("image/jpeg", fileResult.ContentType);
             Assert.NotEmpty(fileResult.FileContents);
             
+            // Verify the image data is valid (at least check it's not empty and has a reasonable size)
+            Assert.True(fileResult.FileContents.Length > 100, "Image data should have a reasonable size");
+        }
+
+        [Fact]
         public async Task GetImage_NonexistentGroup_ReturnsNotFound()
         {
             var logger = NullLogger<GenerateImage>.Instance;
@@ -139,7 +160,7 @@ using Azure.Storage.Blobs;
         [Fact]
         public async Task GetImage_NonexistentImage_ReturnsNotFound()
         {
-            string groupName = "testgroup" + Guid.NewGuid().ToString("n");
+            string groupName = "testgroup";
             _containersToDelete.Add(groupName);
             
             var containerClient = _blobServiceClient.GetBlobContainerClient(groupName);
@@ -152,19 +173,6 @@ using Azure.Storage.Blobs;
 
             var notFoundResult = Assert.IsType<NotFoundObjectResult>(result);
             Assert.Equal($"Image 'nonexistentimage' not found in group '{groupName}'", notFoundResult.Value);
-        }
-
-        [Fact]
-            // Assert
-            Assert.True(responseData.ContainsKey("ImageUrl"));
-            Assert.Equal("Accepted", responseData["Status"].GetString());
-            
-            // Verify blob was created
-            string requestId = responseData["RequestId"].GetString();
-            var containerClient = _blobServiceClient.GetBlobContainerClient(groupName);
-            var blobClient = containerClient.GetBlobClient($"{requestId}.jpg");
-            var exists = await blobClient.ExistsAsync();
-            Assert.True(exists.Value, "Blob should exist in storage");
         }
 
         [Fact]
@@ -232,5 +240,7 @@ using Azure.Storage.Blobs;
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
             Assert.Equal("Invalid JSON format", badRequestResult.Value);
         }
+        
+        
     }
 }
