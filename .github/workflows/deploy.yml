@@ -9,6 +9,8 @@ env:
   AZURE_FUNCTIONAPP_NAME: cm-ai-image    # Replace with your Azure Function app name
   AZURE_FUNCTIONAPP_PACKAGE_PATH: '.'
   DOTNET_VERSION: '9.0.x'
+  ENABLE_ORYX_BUILD: false
+  SCM_DO_BUILD_DURING_DEPLOYMENT: false
 
 jobs:
   build-and-deploy:
