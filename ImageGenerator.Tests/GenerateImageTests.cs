@@ -68,10 +68,8 @@ namespace ImageGenerator.Tests
             _containersToDelete.Add(groupName); // Mark for cleanup
 
             string json = "{" +
-                "\"Email\":\"test@example.com\"," +
                 $"\"Group\":\"{groupName}\"," +
                 "\"Type\":\"bw\"," +
-                "\"SendEmail\":true," +
                 "\"Details\":\"Some details\"," +
                 "\"Name\":\"John Doe\"" +
             "}";
@@ -111,10 +109,8 @@ namespace ImageGenerator.Tests
             _containersToDelete.Add(groupName);
 
             string json = "{" +
-                "\"Email\":\"test@example.com\"," +
                 $"\"Group\":\"{groupName}\"," +
                 "\"Type\":\"bw\"," +
-                "\"SendEmail\":true," +
                 "\"Details\":\"A simple test image\"," +
                 "\"Name\":\"Test User\"" +
             "}";
@@ -180,10 +176,8 @@ namespace ImageGenerator.Tests
         {
             // Arrange: image type is not one of the allowed values
             string json = "{" +
-                "\"Email\":\"test@example.com\"," +
                 "\"Group\":\"newsletter\"," +
-                "\"Type\":\"invalid\"," +
-                "\"SendEmail\":true" +
+                "\"Type\":\"invalid\"" +
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
@@ -213,9 +207,7 @@ namespace ImageGenerator.Tests
         public async Task Run_WithMissingTypeField_ReturnsBadRequest()
         {
             string json = "{" +
-                "\"Email\":\"test@example.com\"," +
-                "\"Group\":\"newsletter\"," +
-                "\"SendEmail\":true" +
+                "\"Group\":\"newsletter\"" +
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
@@ -240,7 +232,29 @@ namespace ImageGenerator.Tests
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
             Assert.Equal("Invalid JSON format", badRequestResult.Value);
         }
-        
-        
+
+        [Theory]
+        [InlineData("123group", "Invalid group name. Must start with a lowercase letter and contain only lowercase letters and numbers.")]
+        [InlineData("Group", "Invalid group name. Must start with a lowercase letter and contain only lowercase letters and numbers.")]
+        [InlineData("group-name", "Invalid group name. Must start with a lowercase letter and contain only lowercase letters and numbers.")]
+        [InlineData("group_name", "Invalid group name. Must start with a lowercase letter and contain only lowercase letters and numbers.")]
+        public async Task Run_WithInvalidGroupName_ReturnsBadRequest(string groupName, string expectedMessage)
+        {
+            // Arrange
+            string json = "{" +
+                $"\"Group\":\"{groupName}\"," +
+                "\"Type\":\"bw\"" +
+            "}";
+            HttpRequest request = CreateHttpRequest(json);
+            var logger = NullLogger<GenerateImage>.Instance;
+            var function = new GenerateImage(logger);
+
+            // Act
+            IActionResult result = await function.Run(request);
+
+            // Assert
+            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(expectedMessage, badRequestResult.Value);
+        }
     }
 }
