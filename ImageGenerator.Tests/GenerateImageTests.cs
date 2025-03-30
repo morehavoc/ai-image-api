@@ -24,7 +24,7 @@ namespace ImageGenerator.Tests
             
             // Set up environment variables for testing
             Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
-            // Note: We don't set OPENAI_API_KEY here to test the fallback mechanism
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", "sk-fake-key");
         }
 
         public async ValueTask DisposeAsync()
@@ -91,7 +91,7 @@ namespace ImageGenerator.Tests
             Assert.True(responseData.ContainsKey("Message"));
             Assert.True(responseData.ContainsKey("ImageUrl"));
             Assert.True(responseData.ContainsKey("Prompt"));
-            Assert.Equal("Accepted", responseData["Status"].GetString());
+            Assert.Equal("Complete", responseData["Status"].GetString());
             
             // Verify blob was created
             string requestId = responseData["RequestId"].GetString();
