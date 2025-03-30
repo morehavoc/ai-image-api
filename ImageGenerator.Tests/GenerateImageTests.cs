@@ -25,25 +25,25 @@ namespace ImageGenerator.Tests
             // Set up environment variables for testing
             Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", "sk-fake-key");
+            Environment.SetEnvironmentVariable("BLOB_CONTAINER_NAME", "test-images");
         }
 
         public async ValueTask DisposeAsync()
         {
             // Cleanup any containers created during tests
-            foreach (var containerName in _containersToDelete)
+            try
             {
-                try
-                {
-                    await _blobServiceClient.DeleteBlobContainerAsync(containerName);
-                }
-                catch
-                {
-                    // Ignore cleanup errors
-                }
+                await _blobServiceClient.DeleteBlobContainerAsync("test-images");
+            }
+            catch
+            {
+                // Ignore cleanup errors
             }
             
             // Clean up environment variables
             Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", null);
+            Environment.SetEnvironmentVariable("OPENAI_API_KEY", null);
+            Environment.SetEnvironmentVariable("BLOB_CONTAINER_NAME", null);
         }
 
         // Helper method to create a fake HttpRequest with the given body
@@ -64,8 +64,7 @@ namespace ImageGenerator.Tests
         public async Task Run_WithValidRequest_ReturnsAcceptedResultAndStoresBlob()
         {
             // Arrange
-            string groupName = "testgroup"; // Ensure unique container name
-            _containersToDelete.Add(groupName); // Mark for cleanup
+            string groupName = "testgroup";
 
             string json = "{" +
                 $"\"Group\":\"{groupName}\"," +
@@ -95,8 +94,8 @@ namespace ImageGenerator.Tests
             
             // Verify blob was created
             string requestId = responseData["RequestId"].GetString();
-            var containerClient = _blobServiceClient.GetBlobContainerClient(groupName);
-            var blobClient = containerClient.GetBlobClient($"{requestId}.jpg");
+            var containerClient = _blobServiceClient.GetBlobContainerClient("test-images");
+            var blobClient = containerClient.GetBlobClient($"{groupName}/{requestId}.jpg");
             var exists = await blobClient.ExistsAsync();
             Assert.True(exists.Value, "Blob should exist in storage");
         }
@@ -159,7 +158,7 @@ namespace ImageGenerator.Tests
             string groupName = "testgroup";
             _containersToDelete.Add(groupName);
             
-            var containerClient = _blobServiceClient.GetBlobContainerClient(groupName);
+            var containerClient = _blobServiceClient.GetBlobContainerClient("test-images");
             await containerClient.CreateIfNotExistsAsync();
 
             var logger = NullLogger<GenerateImage>.Instance;

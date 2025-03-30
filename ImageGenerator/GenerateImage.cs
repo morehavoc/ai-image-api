@@ -33,12 +33,14 @@ namespace morehavoc.ai
     {
         private readonly ILogger<GenerateImage> _logger;
         private readonly string _openAIApiKey;
-
+        private readonly string _containerName;
         private OpenAIClient _openAIClient;
+
         public GenerateImage(ILogger<GenerateImage> logger)
         {
             _logger = logger;
             _openAIApiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? string.Empty;
+            _containerName = Environment.GetEnvironmentVariable("BLOB_CONTAINER_NAME") ?? "images";
             _openAIClient = new OpenAIClient(_openAIApiKey);
         }
 
@@ -81,20 +83,19 @@ namespace morehavoc.ai
                 string storageConnectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "UseDevelopmentStorage=true";
                 BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
                 
-                string containerName = request.Group.ToLowerInvariant();
-                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(_containerName);
                 
                 await containerClient.CreateIfNotExistsAsync();
                 
-                string blobName = requestId + ".jpg";
-                BlobClient blobClient = containerClient.GetBlobClient(blobName);
+                string blobPath = $"{request.Group.ToLowerInvariant()}/{requestId}.jpg";
+                BlobClient blobClient = containerClient.GetBlobClient(blobPath);
                 
                 using (MemoryStream ms = new MemoryStream(imageBytes))
                 {
                     await blobClient.UploadAsync(ms, overwrite: true);
                 }
                 
-                var blobUrl = $"api/image/{containerName}/{requestId}";
+                var blobUrl = $"api/image/{request.Group.ToLowerInvariant()}/{requestId}";
                 
                 var response = new
                 {
@@ -131,16 +132,15 @@ namespace morehavoc.ai
                 string storageConnectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "UseDevelopmentStorage=true";
                 BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
                 
-                string containerName = group.ToLowerInvariant();
-                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                BlobContainerClient containerClient = blobServiceClient.GetBlobContainerClient(_containerName);
                 
                 if (!await containerClient.ExistsAsync())
                 {
-                    return new NotFoundObjectResult($"Group '{group}' not found");
+                    return new NotFoundObjectResult($"Storage container not found");
                 }
 
-                string blobName = $"{id}.jpg";
-                BlobClient blobClient = containerClient.GetBlobClient(blobName);
+                string blobPath = $"{group.ToLowerInvariant()}/{id}.jpg";
+                BlobClient blobClient = containerClient.GetBlobClient(blobPath);
                 
                 if (!await blobClient.ExistsAsync())
                 {

@@ -5,8 +5,9 @@
 ### Azure Storage
 - Uses Azurite for local development
 - Connection string: "UseDevelopmentStorage=true"
-- Containers are created per group name
-- Images stored as {guid}.jpg in group containers
+- Default container name: "images" (configurable via BLOB_CONTAINER_NAME env var)
+- Images stored as {group}/{guid}.jpg in container
+- Groups are virtual folders within the container
 
 ### OpenAI Integration
 - Uses direct HTTP calls to OpenAI API for generating image prompts
@@ -20,36 +21,35 @@
 - AZURE_STORAGE_CONNECTION_STRING must be set
 - OPENAI_API_KEY must be set for AI image generation
 - OPENAI_MODEL can be set to specify which GPT model to use (defaults to "gpt-4")
+- BLOB_CONTAINER_NAME can be set to specify the container name (defaults to "images")
 - FUNCTIONS_WORKER_RUNTIME set to "dotnet-isolated"
 
 ## Testing
-- Tests clean up containers after each run
-- Each test uses unique container names to avoid conflicts
+- Tests use a separate container named "test-images"
+- Tests clean up container after each run
 - Verifies both API responses and blob storage operations
 
 ## API Endpoints
 
 ### POST /api/generate
 Generates an AI image based on input parameters:
-- email (required): User's email
-- group (required): Container/category for the image
+- group (required): Virtual folder path for the image
 - type (required): bw, color, sticker, or whisperframe
-- sendEmail (required): Whether to email the result
 - details (optional): Additional generation details
 - name (optional): User's name
 
 Returns:
 - requestId: Unique GUID for the request
-- status: "Accepted"
+- status: "Complete"
 - message: Status message
 - imageUrl: URL to access the generated image
 - prompt: The generated prompt used for image creation
 
 ### GET /api/image/{group}/{id}
 Retrieves a generated image:
-- group: The container/category of the image
+- group: The virtual folder path of the image
 - id: The unique identifier (GUID) of the image
 
 Returns:
 - The image file with content-type image/jpeg
-- 404 if the group or image doesn't exist
+- 404 if the image doesn't exist
