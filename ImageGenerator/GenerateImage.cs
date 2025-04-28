@@ -171,6 +171,13 @@ namespace morehavoc.ai
 
         private string GetSystemMessage(string imageType)
         {
+            string envVarName = $"PROMPT_CONFIG_SYSTEM_{imageType.ToUpperInvariant()}";
+            string? config = Environment.GetEnvironmentVariable(envVarName);
+            if (!string.IsNullOrEmpty(config))
+            {
+                return config;
+            }
+
             return imageType.ToLower() switch
             {
                 "bw" => @"
@@ -201,7 +208,7 @@ namespace morehavoc.ai
                     Your prompt should be 1-3 sentences long and highly descriptive. Make the art in a style related to
                     the topic or tone or subject of the audio.",
                 
-                _ => @"
+                _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_SYSTEM_DEFAULT") ?? @"
                     You are an expert at creating detailed image generation prompts. 
                     Your task is to create a vivid, detailed prompt for image generation based on the user's request.
                     Your prompt should be 1-3 sentences long and highly descriptive."
@@ -210,25 +217,39 @@ namespace morehavoc.ai
         
         private string GetUserMessagePrefix(string imageType)
         {
+            string envVarName = $"PROMPT_CONFIG_USER_PREFIX_{imageType.ToUpperInvariant()}";
+            string? config = Environment.GetEnvironmentVariable(envVarName);
+            if (!string.IsNullOrEmpty(config))
+            {
+                return config;
+            }
+
             return imageType.ToLower() switch
             {
                 "bw" => "Create a black and white artistic image with strong contrast based on: ",
                 "color" => "Create a vibrant, colorful image based on: ",
                 "sticker" => "Create a cute, simple sticker design based on: ",
                 "whisperframe" => "Create an image the represents the topic of the audio transcript, draw a single topic: ",
-                _ => $"Create a {imageType} image based on: "
+                _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_USER_PREFIX_DEFAULT") ?? $"Create a {imageType} image based on: "
             };
         }
 
         private string GetFinalPromptPrefix(string imageType)
         {
+            string envVarName = $"PROMPT_CONFIG_FINAL_PREFIX_{imageType.ToUpperInvariant()}";
+            string? config = Environment.GetEnvironmentVariable(envVarName);
+            if (!string.IsNullOrEmpty(config))
+            {
+                return config;
+            }
+
             return imageType.ToLower() switch
             {
                 "bw" => "Create a black and white artistic image with strong contrast based on: ",
                 "color" => "Create a vibrant, colorful image based on: ",
                 "sticker" => "Create a simple sticker in black and white that can be easily printed on a thermal printer. Do not use words or phrases, letters are ok. Keep the lines simple and clean. ",
                 "whisperframe" => "Create an image that represents the topic of the audio transcript. Do not draw people sitting around a table, do not draw bicycles. Draw a single topic. ",
-                _ => $"Create a {imageType} image based on: "
+                _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_FINAL_PREFIX_DEFAULT") ?? $"Create a {imageType} image based on: "
             };
         }
         
