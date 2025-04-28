@@ -10,6 +10,7 @@ using Azure.Storage.Blobs;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Images;
@@ -34,13 +35,15 @@ namespace morehavoc.ai
         private readonly ILogger<GenerateImage> _logger;
         private readonly string _openAIApiKey;
         private readonly string _containerName;
+        private readonly IHttpClientFactory _httpClientFactory;
         private OpenAIClient _openAIClient;
 
-        public GenerateImage(ILogger<GenerateImage> logger)
+        public GenerateImage(ILogger<GenerateImage> logger, IHttpClientFactory httpClientFactory)
         {
             _logger = logger;
             _openAIApiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? string.Empty;
             _containerName = Environment.GetEnvironmentVariable("BLOB_CONTAINER_NAME") ?? "images";
+            _httpClientFactory = httpClientFactory;
             _openAIClient = new OpenAIClient(_openAIApiKey);
         }
 
@@ -212,7 +215,19 @@ namespace morehavoc.ai
                 "bw" => "Create a black and white artistic image with strong contrast based on: ",
                 "color" => "Create a vibrant, colorful image based on: ",
                 "sticker" => "Create a cute, simple sticker design based on: ",
-                "whisperframe" => "Create a dreamy, ethereal, slightly abstract image based on: ",
+                "whisperframe" => "Create an image the represents the topic of the audio transcript, draw a single topic: ",
+                _ => $"Create a {imageType} image based on: "
+            };
+        }
+
+        private string GetFinalPromptPrefix(string imageType)
+        {
+            return imageType.ToLower() switch
+            {
+                "bw" => "Create a black and white artistic image with strong contrast based on: ",
+                "color" => "Create a vibrant, colorful image based on: ",
+                "sticker" => "Create a simple sticker in black and white that can be easily printed on a thermal printer. Do not use words or phrases, letters are ok. Keep the lines simple and clean. ",
+                "whisperframe" => "Create an image that represents the topic of the audio transcript. Do not draw people sitting around a table, do not draw bicycles. Draw a single topic. ",
                 _ => $"Create a {imageType} image based on: "
             };
         }
@@ -221,6 +236,8 @@ namespace morehavoc.ai
         {               
             try
             {
+                string prompt = GetFinalPromptPrefix(request.Type);
+
                 string systemMessage = GetSystemMessage(request.Type);
                 
                 string userMessage = GetUserMessagePrefix(request.Type);
@@ -243,11 +260,11 @@ namespace morehavoc.ai
                 
                 var response = await chat.CompleteChatAsync(messages, new ChatCompletionOptions
                 {
-                    Temperature = 0.7f, MaxOutputTokenCount = 300,
+                    Temperature = 0.7f, MaxOutputTokenCount = 1000,
                 });
                 if (response.Value.Content[0].Text != null)
                 {
-                    return response.Value.Content[0].Text;
+                    return $"{prompt} {response.Value.Content[0].Text}";
                 }
                 else
                 {
@@ -264,17 +281,45 @@ namespace morehavoc.ai
         
         private async Task<byte[]> GenerateAiImage(string prompt)
         {
-            ImageGenerationOptions options = new()
+            try
             {
-                Quality = GeneratedImageQuality.High,
-                Size = GeneratedImageSize.W1792xH1024,
-                Style = GeneratedImageStyle.Vivid,
-                ResponseFormat = GeneratedImageFormat.Bytes
-            };
-            var imgClient = _openAIClient.GetImageClient("dall-e-3");
-            GeneratedImage image = await imgClient.GenerateImageAsync(prompt, options);
-            BinaryData bytes = image.ImageBytes;
-            return bytes.ToArray();
+                var client = _httpClientFactory.CreateClient();
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_openAIApiKey}");
+
+                var requestBody = new
+                {
+                    model = "gpt-image-1",
+                    prompt = prompt,
+                    size = "1024x1024",
+                    quality = "high"
+                };
+
+                var response = await client.PostAsJsonAsync("https://api.openai.com/v1/images/generations", requestBody);
+                response.EnsureSuccessStatusCode();
+
+                var result = await response.Content.ReadFromJsonAsync<ImageGenerationResponse>();
+                if (result?.data == null || result.data.Length == 0 || string.IsNullOrEmpty(result.data[0].b64_json))
+                {
+                    throw new Exception("No image data received from OpenAI API");
+                }
+
+                return Convert.FromBase64String(result.data[0].b64_json);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating image with OpenAI API");
+                throw;
+            }
+        }
+
+        private class ImageGenerationResponse
+        {
+            public ImageData[] data { get; set; } = Array.Empty<ImageData>();
+        }
+
+        private class ImageData
+        {
+            public string? b64_json { get; set; }
         }
     }
 }

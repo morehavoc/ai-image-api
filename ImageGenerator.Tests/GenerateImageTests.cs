@@ -17,6 +17,7 @@ namespace ImageGenerator.Tests
     {
         private readonly BlobServiceClient _blobServiceClient;
         private readonly List<string> _containersToDelete = new();
+        private readonly IHttpClientFactory _httpClientFactory;
 
         public GenerateImageTests()
         {
@@ -26,6 +27,9 @@ namespace ImageGenerator.Tests
             Environment.SetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true");
             Environment.SetEnvironmentVariable("OPENAI_API_KEY", "sk-fake-key");
             Environment.SetEnvironmentVariable("BLOB_CONTAINER_NAME", "test-images");
+
+            // Create a mock HttpClientFactory that returns a mock HttpClient
+            _httpClientFactory = new TestHttpClientFactory();
         }
 
         public async ValueTask DisposeAsync()
@@ -60,6 +64,49 @@ namespace ImageGenerator.Tests
             return new DefaultHttpContext().Request;
         }
 
+        private class TestHttpClientFactory : IHttpClientFactory
+        {
+            public HttpClient CreateClient(string name)
+            {
+                // Create a handler that returns a fake image response
+                var handler = new TestHttpMessageHandler();
+                return new HttpClient(handler);
+            }
+        }
+
+        private class TestHttpMessageHandler : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                // Create a fake image (1x1 black JPEG)
+                byte[] fakeImageBytes = new byte[] { 
+                    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 
+                    0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 
+                    0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 
+                    0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+                    0x00, 0x00, 0x00, 0x0A, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 
+                    0x3F, 0x00, 0x37, 0xFF, 0xD9
+                };
+
+                // Convert to base64
+                string base64Image = Convert.ToBase64String(fakeImageBytes);
+
+                // Create the response JSON
+                var responseJson = new { data = new[] { new { b64_json = base64Image } } };
+                
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(responseJson)
+                };
+            }
+        }
+
         [Fact]
         public async Task Run_WithValidRequest_ReturnsAcceptedResultAndStoresBlob()
         {
@@ -74,7 +121,7 @@ namespace ImageGenerator.Tests
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             // Act
             IActionResult result = await function.Run(request);
@@ -115,7 +162,7 @@ namespace ImageGenerator.Tests
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             // Act - Generate the image
             IActionResult generateResult = await function.Run(request);
@@ -144,7 +191,7 @@ namespace ImageGenerator.Tests
         public async Task GetImage_NonexistentGroup_ReturnsNotFound()
         {
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             var result = await function.GetImage(CreateEmptyRequest(), "nonexistentgroup", "someid");
 
@@ -162,7 +209,7 @@ namespace ImageGenerator.Tests
             await containerClient.CreateIfNotExistsAsync();
 
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             var result = await function.GetImage(CreateEmptyRequest(), groupName, "nonexistentimage");
 
@@ -180,7 +227,7 @@ namespace ImageGenerator.Tests
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             IActionResult result = await function.Run(request);
 
@@ -194,7 +241,7 @@ namespace ImageGenerator.Tests
             string invalidJson = "Not a JSON";
             HttpRequest request = CreateHttpRequest(invalidJson);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             IActionResult result = await function.Run(request);
 
@@ -210,7 +257,7 @@ namespace ImageGenerator.Tests
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             IActionResult result = await function.Run(request);
 
@@ -224,7 +271,7 @@ namespace ImageGenerator.Tests
             string json = "";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             IActionResult result = await function.Run(request);
 
@@ -246,7 +293,7 @@ namespace ImageGenerator.Tests
             "}";
             HttpRequest request = CreateHttpRequest(json);
             var logger = NullLogger<GenerateImage>.Instance;
-            var function = new GenerateImage(logger);
+            var function = new GenerateImage(logger, _httpClientFactory);
 
             // Act
             IActionResult result = await function.Run(request);
