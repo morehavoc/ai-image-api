@@ -17,6 +17,18 @@ using OpenAI.Images;
 
 namespace morehavoc.ai
 {
+    public class OpenAIApiException : Exception
+    {
+        public string OpenAIErrorResponseBody { get; }
+        public System.Net.HttpStatusCode StatusCode { get; }
+
+        public OpenAIApiException(string message, string openAIErrorResponseBody, System.Net.HttpStatusCode statusCode) : base(message)
+        {
+            OpenAIErrorResponseBody = openAIErrorResponseBody;
+            StatusCode = statusCode;
+        }
+    }
+
     public class ImageGenerationRequest
     {
         [Required]
@@ -28,6 +40,8 @@ namespace morehavoc.ai
         public string? Details { get; set; }
 
         public string? Name { get; set; }
+
+        public string? Size { get; set; }
     }
 
     public class GenerateImage
@@ -81,13 +95,19 @@ namespace morehavoc.ai
                 {
                     return new BadRequestObjectResult("Invalid group name. Must start with a lowercase letter and contain only lowercase letters and numbers.");
                 }
+
+                if (!string.IsNullOrWhiteSpace(request.Size) && 
+                    request.Size != "1024x1024" && request.Size != "1536x1024" && request.Size != "1024x1536")
+                {
+                    return new BadRequestObjectResult("Invalid size parameter for GPT Image 1. Must be one of: 1024x1024, 1536x1024, or 1024x1536. If not specified, defaults to 1024x1024.");
+                }
                 
                 string requestId = Guid.NewGuid().ToString();
                 
                 string imagePrompt = await GenerateImagePromptAsync(request);
                 _logger.LogInformation("Prompt is: {prompt}", imagePrompt);
                 
-                byte[] imageBytes = await GenerateAiImage(imagePrompt);
+                byte[] imageBytes = await GenerateAiImage(imagePrompt, request.Size);
                 
                 string storageConnectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "UseDevelopmentStorage=true";
                 BlobServiceClient blobServiceClient = new BlobServiceClient(storageConnectionString);
@@ -120,6 +140,14 @@ namespace morehavoc.ai
             catch (JsonException)
             {
                 return new BadRequestObjectResult("Invalid JSON format");
+            }
+            catch (OpenAIApiException ex)
+            {
+                _logger.LogError(ex, "OpenAI API error during image generation. OpenAI Response: {OpenAIErrorBody}", ex.OpenAIErrorResponseBody);
+                return new ObjectResult(ex.OpenAIErrorResponseBody)
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError
+                };
             }
             catch (Exception ex)
             {
@@ -320,7 +348,7 @@ namespace morehavoc.ai
             }
         }
         
-        private async Task<byte[]> GenerateAiImage(string prompt)
+        private async Task<byte[]> GenerateAiImage(string prompt, string? requestedSize)
         {
             HttpResponseMessage? response = null;
             string responseBody = string.Empty;
@@ -333,26 +361,25 @@ namespace morehavoc.ai
                 {
                     model = "gpt-image-1",
                     prompt = prompt,
-                    size = "1024x1024",
-                    quality = "high"
+                    quality = "high",
+                    size = string.IsNullOrWhiteSpace(requestedSize) ? "1024x1024" : requestedSize,
                 };
 
                 response = await client.PostAsJsonAsync("https://api.openai.com/v1/images/generations", requestBodyPayload);
+                responseBody = await response.Content.ReadAsStringAsync();
                 
                 if (!response.IsSuccessStatusCode)
                 {
-                    string errorBody = await response.Content.ReadAsStringAsync();
-                    _logger.LogError("OpenAI API call failed. Status: {StatusCode}. Response: {ErrorBody}", response.StatusCode, errorBody);
-                    response.EnsureSuccessStatusCode();
+                    _logger.LogError("OpenAI API call failed. Status: {StatusCode}. Response: {ErrorBody}", response.StatusCode, responseBody);
+                    throw new OpenAIApiException($"OpenAI API request failed with status {response.StatusCode}", responseBody, response.StatusCode);
                 }
 
-                responseBody = await response.Content.ReadAsStringAsync();
                 var result = JsonSerializer.Deserialize<ImageGenerationResponse>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (result?.data == null || result.data.Length == 0 || string.IsNullOrEmpty(result.data[0].b64_json))
                 {
                     _logger.LogError("No image data (b64_json) received from OpenAI API despite successful status. Full response: {ResponseBody}", responseBody);
-                    throw new Exception("No image data received from OpenAI API (empty data array or b64_json).");
+                    throw new OpenAIApiException("No image data (b64_json) received from OpenAI API despite successful status.", responseBody, response.StatusCode);
                 }
 
                 return Convert.FromBase64String(result.data[0].b64_json);
@@ -360,11 +387,12 @@ namespace morehavoc.ai
             catch (JsonException jsonEx)
             {
                 _logger.LogError(jsonEx, "Error parsing JSON response from OpenAI API. Response body attempt: {ResponseBody}", responseBody);
-                throw;
+                throw new OpenAIApiException($"Error parsing JSON response from OpenAI API: {jsonEx.Message}. Response body: {responseBody}", responseBody, response?.StatusCode ?? System.Net.HttpStatusCode.InternalServerError);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating image with OpenAI API");
+                if (ex is OpenAIApiException) throw;
+                _logger.LogError(ex, "Unexpected error in GenerateAiImage. Response body if available: {ResponseBody}", responseBody);
                 throw;
             }
         }

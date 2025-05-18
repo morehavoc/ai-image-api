@@ -16,7 +16,8 @@ Generate an AI image based on provided parameters.
     "group": "string (required)",     // Must start with lowercase letter, contain only lowercase letters and numbers
     "type": "string (required)",      // One of: "bw", "color", "sticker", "whisperframe", "raw"
     "details": "string (optional)",    // Additional generation details (required if type is "raw")
-    "name": "string (optional)"       // User's name
+    "name": "string (optional)",       // User's name
+    "size": "string (optional)"       // Desired image size. For DALL-E 3, supported values are "1024x1024", "1792x1024", "1024x1792". Defaults to "1024x1024".
 }
 ```
 
@@ -37,7 +38,10 @@ Generate an AI image based on provided parameters.
   - Invalid group name (must start with lowercase letter, contain only lowercase letters and numbers)
   - Invalid image type (must be one of: bw, color, sticker, whisperframe, raw)
   - Missing or empty details field when type is "raw"
+  - Invalid size parameter (if specified, must be one of the DALL-E 3 supported sizes)
 - 500 Internal Server Error
+  - If the OpenAI image generation API call fails, the body of this 500 response will contain the error details from OpenAI.
+  - For other internal errors, the body might be a generic error message or empty.
 
 ### Retrieve Generated Image
 `GET /image/{group}/{id}`
@@ -67,7 +71,8 @@ response = await post("/api/generate", {
     "group": "newsletter",
     "type": "color",
     "details": "A sunset over mountains",
-    "name": "John"
+    "name": "John",
+    "size": "1792x1024"  # Optional: specify a larger size for landscape images
 })
 
 # Get the image URL from response
