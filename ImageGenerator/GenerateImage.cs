@@ -80,6 +80,7 @@ namespace morehavoc.ai
                 string requestId = Guid.NewGuid().ToString();
                 
                 string imagePrompt = await GenerateImagePromptAsync(request);
+                _logger.LogInformation("Prompt is: {prompt}", imagePrompt);
                 
                 byte[] imageBytes = await GenerateAiImage(imagePrompt);
                 
@@ -302,12 +303,14 @@ namespace morehavoc.ai
         
         private async Task<byte[]> GenerateAiImage(string prompt)
         {
+            HttpResponseMessage? response = null;
+            string responseBody = string.Empty;
             try
             {
                 var client = _httpClientFactory.CreateClient();
                 client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_openAIApiKey}");
 
-                var requestBody = new
+                var requestBodyPayload = new
                 {
                     model = "gpt-image-1",
                     prompt = prompt,
@@ -315,16 +318,30 @@ namespace morehavoc.ai
                     quality = "high"
                 };
 
-                var response = await client.PostAsJsonAsync("https://api.openai.com/v1/images/generations", requestBody);
-                response.EnsureSuccessStatusCode();
+                response = await client.PostAsJsonAsync("https://api.openai.com/v1/images/generations", requestBodyPayload);
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    string errorBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("OpenAI API call failed. Status: {StatusCode}. Response: {ErrorBody}", response.StatusCode, errorBody);
+                    response.EnsureSuccessStatusCode();
+                }
 
-                var result = await response.Content.ReadFromJsonAsync<ImageGenerationResponse>();
+                responseBody = await response.Content.ReadAsStringAsync();
+                var result = JsonSerializer.Deserialize<ImageGenerationResponse>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
                 if (result?.data == null || result.data.Length == 0 || string.IsNullOrEmpty(result.data[0].b64_json))
                 {
-                    throw new Exception("No image data received from OpenAI API");
+                    _logger.LogError("No image data (b64_json) received from OpenAI API despite successful status. Full response: {ResponseBody}", responseBody);
+                    throw new Exception("No image data received from OpenAI API (empty data array or b64_json).");
                 }
 
                 return Convert.FromBase64String(result.data[0].b64_json);
+            }
+            catch (JsonException jsonEx)
+            {
+                _logger.LogError(jsonEx, "Error parsing JSON response from OpenAI API. Response body attempt: {ResponseBody}", responseBody);
+                throw;
             }
             catch (Exception ex)
             {
