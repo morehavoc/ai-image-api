@@ -34,8 +34,8 @@
 ### POST /api/generate
 Generates an AI image based on input parameters:
 - group (required): Virtual folder path for the image
-- type (required): bw, color, sticker, or whisperframe
-- details (optional): Additional generation details
+- type (required): bw, color, sticker, whisperframe, or raw
+- details (optional): Additional generation details. Required if type is "raw".
 - name (optional): User's name
 
 Returns:

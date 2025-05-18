@@ -69,7 +69,12 @@ namespace morehavoc.ai
 
                 if (!IsValidImageType(request.Type))
                 {
-                    return new BadRequestObjectResult("Invalid image type. Must be one of: bw, color, sticker, whisperframe");
+                    return new BadRequestObjectResult("Invalid image type. Must be one of: bw, color, sticker, whisperframe, raw");
+                }
+
+                if (request.Type.ToLower() == "raw" && string.IsNullOrWhiteSpace(request.Details))
+                {
+                    return new BadRequestObjectResult("For 'raw' type, 'details' field is required and cannot be empty.");
                 }
 
                 if (!System.Text.RegularExpressions.Regex.IsMatch(request.Group, "^[a-z][a-z0-9]*$"))
@@ -165,7 +170,7 @@ namespace morehavoc.ai
         {
             return type.ToLower() switch
             {
-                "bw" or "color" or "sticker" or "whisperframe" => true,
+                "bw" or "color" or "sticker" or "whisperframe" or "raw" => true,
                 _ => false
             };
         }
@@ -209,6 +214,11 @@ namespace morehavoc.ai
                     Your prompt should be 1-3 sentences long and highly descriptive. Make the art in a style related to
                     the topic or tone or subject of the audio.",
                 
+                "raw" => @"
+                    You are an expert at creating detailed image generation prompts. 
+                    Your task is to create a vivid, detailed prompt for image generation based on the user's request.
+                    Your prompt should be 1-3 sentences long and highly descriptive.",
+                
                 _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_SYSTEM_DEFAULT") ?? @"
                     You are an expert at creating detailed image generation prompts. 
                     Your task is to create a vivid, detailed prompt for image generation based on the user's request.
@@ -231,6 +241,7 @@ namespace morehavoc.ai
                 "color" => "Create a vibrant, colorful image based on: ",
                 "sticker" => "Create a cute, simple sticker design based on: ",
                 "whisperframe" => "Create an image the represents the topic of the audio transcript, draw a single topic: ",
+                "raw" => "Create a detailed image based on: ",
                 _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_USER_PREFIX_DEFAULT") ?? $"Create a {imageType} image based on: "
             };
         }
@@ -250,12 +261,19 @@ namespace morehavoc.ai
                 "color" => "Create a vibrant, colorful image based on: ",
                 "sticker" => "Create a simple sticker in black and white that can be easily printed on a thermal printer. Do not use words or phrases, letters are ok. Keep the lines simple and clean. ",
                 "whisperframe" => "Create an image that represents the topic of the audio transcript. Do not draw people sitting around a table, do not draw bicycles. Draw a single topic. ",
+                "raw" => "Create a detailed image based on: ",
                 _ => Environment.GetEnvironmentVariable("PROMPT_CONFIG_FINAL_PREFIX_DEFAULT") ?? $"Create a {imageType} image based on: "
             };
         }
         
         private async Task<string> GenerateImagePromptAsync(ImageGenerationRequest request)
         {               
+            if (request.Type.ToLower() == "raw")
+            {
+                _logger.LogInformation("Raw image type requested, using details directly as prompt.");
+                return request.Details!;
+            }
+
             try
             {
                 string prompt = GetFinalPromptPrefix(request.Type);
@@ -273,6 +291,7 @@ namespace morehavoc.ai
                 {
                     userMessage += $"User name: {request.Name}. ";
                 }
+
                 var chat = _openAIClient.GetChatClient("gpt-4");
                 List<ChatMessage> messages = 
                 [

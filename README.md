@@ -9,7 +9,8 @@ Each image generation request requires:
 	- color - full color image
 	- sticker - black and white, but designed for the sticker printer
 	- whisperframe - Generate a full image directly, specific to the whisperframe app.
-- details (optional) - A string provided by the user to help target the image generation
+	- raw - Uses the details field directly as the image generation prompt, bypassing any additional AI-driven prompt engineering.
+- details (optional) - A string provided by the user to help target the image generation. Required if type is "raw".
 - name (optional) - The person's name
 
 Each group defined above will be registered in the settings file and will have the following properties:

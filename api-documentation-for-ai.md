@@ -14,8 +14,8 @@ Generate an AI image based on provided parameters.
 ```json
 {
     "group": "string (required)",     // Must start with lowercase letter, contain only lowercase letters and numbers
-    "type": "string (required)",      // One of: "bw", "color", "sticker", "whisperframe"
-    "details": "string (optional)",    // Additional generation details
+    "type": "string (required)",      // One of: "bw", "color", "sticker", "whisperframe", "raw"
+    "details": "string (optional)",    // Additional generation details (required if type is "raw")
     "name": "string (optional)"       // User's name
 }
 ```
@@ -35,7 +35,8 @@ Generate an AI image based on provided parameters.
 - 400 Bad Request
   - Invalid JSON format
   - Invalid group name (must start with lowercase letter, contain only lowercase letters and numbers)
-  - Invalid image type (must be one of: bw, color, sticker, whisperframe)
+  - Invalid image type (must be one of: bw, color, sticker, whisperframe, raw)
+  - Missing or empty details field when type is "raw"
 - 500 Internal Server Error
 
 ### Retrieve Generated Image
@@ -57,6 +58,7 @@ Retrieve a previously generated image.
 - `color`: Vibrant, colorful image
 - `sticker`: Simple, black and white cartoon-style sticker design
 - `whisperframe`: Dreamy, ethereal, slightly abstract image
+- `raw`: Uses the details field directly as the image generation prompt, bypassing any additional AI-driven prompt engineering
 
 ## Example Usage
 ```python
